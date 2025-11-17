@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>System Issue Tracker</title>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Firebase v10+ Modular SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js";
+    import { 
+      getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc 
+    } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCXFmXgtx_YnmAcQSz8dzssaKfRueuQZNg",
+      authDomain: "migration-a5602.firebaseapp.com",
+      projectId: "migration-a5602",
+      storageBucket: "migration-a5602.firebasestorage.app",
+      messagingSenderId: "701191508912",
+      appId: "1:701191508912:web:48fd0481f3559a41cafc75"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const issuesCol = collection(db, 'issues');
+
+    const $ = id => document.getElementById(id);
+    const toast = (msg, error = false) => {
+      const el = $('statusMessage');
+      el.innerHTML = `<div class="alert ${error?'alert-error':'alert-success'}">${msg}</div>`;
+      setTimeout(() => el.innerHTML = '', 3000);
+    };
+    const escapeHtml = s => s ? String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;") : '';
+
+    // Set today
+    $('reportDate').textContent = new Date().toISOString().split('T')[0];
+
+    // Add Issue
+    $('addBtn').onclick = async () => {
+      const summary = $('issueSummary').value.trim();
+      const module = $('moduleScreen').value.trim();
+      if (!summary || !module) return toast('Fill Summary & Module', true);
+
+      try {
+        await addDoc(issuesCol, {
+          summary,
+          moduleScreen: module,
+          user: $('userName').value.trim() || 'Guest',
+          itReport: $('itReport').value.trim() || 'No details',
+          assigned: $('assignedTo').value.trim() || 'TBD',
+          priority: $('priority').value,
+          status: $('status').value,
+          reportDate: $('reportDate').textContent,
+          dueDate: $('dueDate').value || 'Not set',
+          timestamp: new Date().toISOString()
+        });
+        toast('Issue added!');
+        clearForm();
+      } catch (e) {
+        toast('Error: ' + e.message, true);
+      }
+    };
+
+    function clearForm() {
+      ['issueSummary','moduleScreen','userName','itReport','dueDate'].forEach(id => $(id).value = '');
+      $('assignedTo').value = 'TBD';
+      $('priority').value = 'Medium';
+      $('status').value = 'Open';
+    }
+
+    // Live Table + Chart Update
+    const tbody = $('issueTable').querySelector('tbody');
+    let editingRow = null;
+    let chartInstance = null;
+
+    function updateChartAndCounter(docs) {
+      const statusCount = { Open: 0, 'In-Progress': 0, Closed: 0 };
+      docs.forEach(d => {
+        const status = d.data().status;
+        if (status in statusCount) statusCount[status]++;
+      });
+
+      // Update total
+      const total = docs.length;
+      $('totalIssues').textContent = total;
+
+      // Update chart
+      const ctx = $('statusChart');
+      if (chartInstance) chartInstance.destroy();
+
+      chartInstance = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels: ['Open', 'In-Progress', 'Closed'],
+          datasets: [{
+            data: [statusCount.Open, statusCount['In-Progress'], statusCount.Closed],
+            backgroundColor: ['#ff9800', '#2196f3', '#4caf50'],
+            borderColor: '#fff',
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { position: 'bottom' },
+            title: { display: true, text: 'Issues by Status', font: { size: 16 } }
+          }
+        }
+      });
+    }
+
+    onSnapshot(issuesCol, snapshot => {
+      tbody.innerHTML = '';
+      const docs = snapshot.docs;
+
+      if (docs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="11" style="color:#777;">No issues yet.</td></tr>';
+      } else {
+        let id = 1;
+        docs.forEach(d => {
+          const data = d.data();
+          const row = tbody.insertRow();
+          row.dataset.docId = d.id;
+          row.innerHTML = `
+            <td>${id++}</td>
+            <td class="editable" data-field="summary">${escapeHtml(data.summary)}</td>
+            <td class="editable" data-field="itReport" style="text-align:left;max-width:220px;white-space:pre-wrap;">${escapeHtml(data.itReport)}</td>
+            <td class="editable" data-field="moduleScreen">${escapeHtml(data.moduleScreen)}</td>
+            <td class="editable" data-field="user">${escapeHtml(data.user)}</td>
+            <td class="editable" data-field="assigned">${escapeHtml(data.assigned)}</td>
+            <td class="editable" data-field="priority"><span class="priority-badge" data-value="${data.priority}">${data.priority}</span></td>
+            <td class="editable" data-field="status"><strong>${data.status}</strong></td>
+            <td>${data.reportDate}</td>
+            <td class="editable" data-field="dueDate">${data.dueDate}</td>
+            <td>
+              <button class="edit-btn" data-id="${d.id}">Edit</button>
+              <button class="delete-btn" data-id="${d.id}">Delete</button>
+            </td>`;
+        });
+      }
+
+      // Update chart & counter
+      updateChartAndCounter(docs);
+    });
+
+    // Edit / Save / Delete
+    tbody.addEventListener('click', async e => {
+      const btn = e.target;
+      const row = btn.closest('tr');
+      const docId = btn.dataset.id;
+
+      // DELETE
+      if (btn.classList.contains('delete-btn')) {
+        if (!confirm('Delete this issue?')) return;
+        try {
+          await deleteDoc(doc(db, 'issues', docId));
+          toast('Deleted');
+        } catch (e) {
+          toast('Delete failed: ' + e.message, true);
+        }
+        return;
+      }
+
+      // EDIT / SAVE
+      if (btn.classList.contains('edit-btn') || btn.classList.contains('save-btn')) {
+        if (editingRow && editingRow !== row) {
+          toast('Finish editing the current row first', true);
+          return;
+        }
+
+        if (btn.classList.contains('edit-btn')) {
+          editingRow = row;
+          btn.textContent = 'Save';
+          btn.classList.replace('edit-btn', 'save-btn');
+
+          row.querySelectorAll('.editable').forEach(cell => {
+            const field = cell.dataset.field;
+            const value = cell.textContent.trim();
+            cell.dataset.original = value;
+
+            let input;
+            if (field === 'priority') {
+              input = Object.assign(document.createElement('select'), {
+                innerHTML: ['Low','Medium','High'].map(p =>
+                  `<option value="${p}" ${p===value?'selected':''}>${p}</option>`
+                ).join('')
+              });
+            } else if (field === 'status') {
+              input = Object.assign(document.createElement('select'), {
+                innerHTML: ['Open','In-Progress','Closed'].map(s =>
+                  `<option value="${s}" ${s===value?'selected':''}>${s}</option>`
+                ).join('')
+              });
+            } else if (field === 'itReport') {
+              input = Object.assign(document.createElement('textarea'), {rows:2, value});
+            } else if (field === 'dueDate') {
+              input = Object.assign(document.createElement('input'), {type:'date', value: value==='Not set'?'':value});
+            } else {
+              input = Object.assign(document.createElement('input'), {type:'text', value});
+            }
+
+            input.style.width = '100%';
+            input.style.padding = '4px';
+            input.style.border = '1px solid #0077aa';
+            input.style.borderRadius = '4px';
+            cell.innerHTML = '';
+            cell.appendChild(input);
+          });
+
+          const cancel = Object.assign(document.createElement('button'), {
+            textContent: 'Cancel',
+            className: 'cancel-btn',
+            onclick: () => location.reload()
+          });
+          row.querySelector('td:last-child').appendChild(cancel);
+
+        } else {
+          const updates = {};
+          let hasSummary = false, hasModule = false;
+
+          row.querySelectorAll('.editable').forEach(cell => {
+            const field = cell.dataset.field;
+            const input = cell.querySelector('input, select, textarea');
+            let value = input ? input.value.trim() : cell.dataset.original;
+
+            if (field === 'summary') hasSummary = !!value;
+            if (field === 'moduleScreen') hasModule = !!value;
+
+            updates[field] = value || cell.dataset.original;
+          });
+
+          if (!hasSummary || !hasModule) {
+            toast('Summary and Module/Screen are required', true);
+            return;
+          }
+
+          try {
+            await updateDoc(doc(db, 'issues', docId), updates);
+            toast('Updated successfully');
+            editingRow = null;
+          } catch (e) {
+            console.error(e);
+            toast('Save failed: ' + e.message, true);
+          }
+        }
+      }
+    });
+
+    // Export CSV
+    window.exportCSV = () => {
+      const rows = [['ID','Summary','IT Report','Module','User','Assigned','Priority','Status','Report Date','Due Date']];
+      document.querySelectorAll('#issueTable tbody tr').forEach(tr => {
+        const cells = [];
+        for (let i = 0; i < 10; i++) {
+          let text = tr.cells[i].textContent || tr.cells[i].querySelector('input, select, textarea')?.value || '';
+          cells.push(`"${text.replace(/"/g, '""')}"`);
+        }
+        rows.push(cells.join(','));
+      });
+      const blob = new Blob([rows.join('\n')], {type: 'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `issues_${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+    };
+  </script>
+
+  <style>
+    body{font-family:Arial,sans-serif;background:#f0f4f8;margin:0;color:#222}
+    .container{max-width:1200px;margin:20px auto;background:#fff;padding:25px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.1)}
+    h1{color:#0066cc;margin-top:0}
+    h2{color:#0066cc;border-bottom:2px solid #0066cc;padding-bottom:8px}
+    label{display:block;margin:12px 0 6px;font-weight:bold;color:#2c3e50}
+    input,select,textarea{width:100%;padding:10px;margin-bottom:12px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:14px}
+    button{background:#0099cc;color:#fff;border:none;padding:11px 18px;border-radius:6px;cursor:pointer;font-weight:bold;margin-right:6px}
+    button:hover{background:#0077aa}
+    .edit-btn{background:#007bff}
+    .save-btn{background:#28a745}
+    .cancel-btn{background:#6c757d}
+    .delete-btn{background:#dc3545}
+    .export-btn{background:#28a745}
+    .export-btn:hover{background:#218838}
+    table{width:100%;border-collapse:collapse;margin-top:20px;font-size:14px}
+    th,td{border:1px solid #ddd;padding:10px;text-align:center;vertical-align:middle}
+    th{background:#e0f0ff;color:#0066cc;font-weight:bold}
+    tr:nth-child(even){background:#f9f9f9}
+    .priority-badge{padding:2px 6px;border-radius:4px;font-size:11px;background:#fff3e0;color:#ef6c00}
+    .priority-badge[data-value="High"]{background:#ffebee;color:#c62828}
+    .priority-badge[data-value="Low"]{background:#e8f5e9;color:#2e7d32}
+    .alert{padding:12px;margin:15px 0;border-radius:6px;font-weight:bold}
+    .alert-success{background:#d4edda;border:1px solid #28a745;color:#155724}
+    .alert-error{background:#f8d7da;border:1px solid #dc3545;color:#721c24}
+
+    /* Stats & Chart */
+    .stats{display:flex;justify-content:space-between;align-items:center;margin:20px 0;flex-wrap:wrap}
+    .total-issues{font-size:18px;font-weight:bold;color:#0066cc}
+    .chart-container{max-width:400px;width:100%;margin:20px auto}
+    @media (max-width: 768px) {
+      .stats{flex-direction:column;text-align:center}
+      .chart-container{margin:20px 0}
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>System Issue Tracker</h1>
+    <p><strong>Date:</strong> <span id="reportDate"></span> | Public add/edit/delete.</p>
+
+    <button class="export-btn" onclick="exportCSV()" style="float:right;">Export CSV</button>
+    <div style="clear:both;"></div>
+
+    <h2>Add New Issue</h2>
+
+    <label>Issue Summary <span style="color:red">*</span></label>
+    <input id="issueSummary" placeholder="e.g. Login button not working">
+
+    <label>Module / Screen <span style="color:red">*</span></label>
+    <input id="moduleScreen" placeholder="e.g. Login Page">
+
+    <label>Your Name (optional)</label>
+    <input id="userName" placeholder="e.g. Ali">
+
+    <label>IT Report / Steps</label>
+    <textarea id="itReport" rows="3" placeholder="What happened? Steps to reproduce..."></textarea>
+
+    <label>Assigned To</label>
+    <input id="assignedTo" value="TBD">
+
+    <label>Priority</label>
+    <select id="priority"><option>Low</option><option selected>Medium</option><option>High</option></select>
+
+    <label>Status</label>
+    <select id="status"><option selected>Open</option><option>In-Progress</option><option>Closed</option></select>
+
+    <label>Due Date</label>
+    <input id="dueDate" type="date">
+
+    <button id="addBtn">Add Issue</button>
+    <div id="statusMessage"></div>
+
+    <!-- Stats & Chart -->
+    <div class="stats">
+      <div class="total-issues">Total Issues: <span id="totalIssues">0</span></div>
+    </div>
+
+    <div class="chart-container">
+      <canvas id="statusChart"></canvas>
+    </div>
+
+    <br>
+
+    <table id="issueTable">
+      <thead>
+        <tr>
+          <th>ID</th><th>Summary</th><th>IT Report</th><th>Module</th>
+          <th>User</th><th>Assigned</th><th>Priority</th><th>Status</th>
+          <th>Report Date</th><th>Due Date</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="11" style="color:#777;">Loading issues...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</body>
+</html>
