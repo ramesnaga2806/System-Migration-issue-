@@ -128,7 +128,7 @@
           row.innerHTML = `
             <td>${id++}</td>
             <td class="editable" data-field="summary">${escapeHtml(data.summary)}</td>
-            <td class="editable" data-field="itReport" style="text-align:left;max-width:220px;white-space:pre-wrap;">${escapeHtml(data.itReport)}</td>
+            <td class="editable wrap-text" data-field="itReport">${escapeHtml(data.itReport)}</td>
             <td class="editable" data-field="moduleScreen">${escapeHtml(data.moduleScreen)}</td>
             <td class="editable" data-field="user">${escapeHtml(data.user)}</td>
             <td class="editable" data-field="assigned">${escapeHtml(data.assigned)}</td>
@@ -143,7 +143,6 @@
         });
       }
 
-      // Update chart & counter
       updateChartAndCounter(docs);
     });
 
@@ -153,7 +152,6 @@
       const row = btn.closest('tr');
       const docId = btn.dataset.id;
 
-      // DELETE
       if (btn.classList.contains('delete-btn')) {
         if (!confirm('Delete this issue?')) return;
         try {
@@ -165,7 +163,6 @@
         return;
       }
 
-      // EDIT / SAVE
       if (btn.classList.contains('edit-btn') || btn.classList.contains('save-btn')) {
         if (editingRow && editingRow !== row) {
           toast('Finish editing the current row first', true);
@@ -196,7 +193,8 @@
                 ).join('')
               });
             } else if (field === 'itReport') {
-              input = Object.assign(document.createElement('textarea'), {rows:2, value});
+              input = Object.assign(document.createElement('textarea'), {rows:4, value});
+              input.style.height = 'auto';
             } else if (field === 'dueDate') {
               input = Object.assign(document.createElement('input'), {type:'date', value: value==='Not set'?'':value});
             } else {
@@ -272,7 +270,7 @@
 
   <style>
     body{font-family:Arial,sans-serif;background:#f0f4f8;margin:0;color:#222}
-    .container{max-width:1200px;margin:20px auto;background:#fff;padding:25px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.1)}
+    .container{max-width:1300px;margin:20px auto;background:#fff;padding:25px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.1)}
     h1{color:#0066cc;margin-top:0}
     h2{color:#0066cc;border-bottom:2px solid #0066cc;padding-bottom:8px}
     label{display:block;margin:12px 0 6px;font-weight:bold;color:#2c3e50}
@@ -296,6 +294,15 @@
     .alert-success{background:#d4edda;border:1px solid #28a745;color:#155724}
     .alert-error{background:#f8d7da;border:1px solid #dc3545;color:#721c24}
 
+    /* IT Report: Text Wrap */
+    .wrap-text {
+      text-align: left !important;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-width: 250px;
+      line-height: 1.4;
+    }
+
     /* Stats & Chart */
     .stats{display:flex;justify-content:space-between;align-items:center;margin:20px 0;flex-wrap:wrap}
     .total-issues{font-size:18px;font-weight:bold;color:#0066cc}
@@ -303,6 +310,7 @@
     @media (max-width: 768px) {
       .stats{flex-direction:column;text-align:center}
       .chart-container{margin:20px 0}
+      .wrap-text{max-width: 180px;}
     }
   </style>
 </head>
